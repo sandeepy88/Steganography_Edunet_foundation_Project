@@ -1,61 +1,81 @@
 from PIL import Image
 from cryptography.fernet import Fernet
+import itertools
 
-# Generate key (run once & save it)
-key = Fernet.generate_key()
-cipher = Fernet(key)
-
-print("Encryption Key:", key)
-
-def hide_data(image_path, message, output_image):
-    encrypted_msg = cipher.encrypt(message.encode())
-    binary_msg = ''.join(format(byte, '08b') for byte in encrypted_msg) + '1111111111111110'
-
-    img = Image.open(image_path)
-    pixels = img.load()
-
-    width, height = img.size
-    data_index = 0
-
-    for y in range(height):
-        for x in range(width):
-            if data_index < len(binary_msg):
-                r, g, b = pixels[x, y]
-                r = (r & ~1) | int(binary_msg[data_index])
-                pixels[x, y] = (r, g, b)
-                data_index += 1
-
-    img.save(output_image)
-    print("Data hidden successfully!")
-
-# Example
-hide_data("input.png", "Secret Message Here", "output.png")
+DELIMITER = "1111111111111110"
 
 
----
+# ---------- KEY GENERATION ----------
+def generate_key():
+    return Fernet.generate_key()
 
- 2. Extract + Decrypt Data from Image
 
-def extract_data(image_path, key):
+# ---------- ENCRYPT ----------
+def encrypt_message(message: str, key: bytes) -> str:
     cipher = Fernet(key)
-    img = Image.open(image_path)
-    pixels = img.load()
+    encrypted = cipher.encrypt(message.encode())
+    return ''.join(format(byte, '08b') for byte in encrypted) + DELIMITER
 
-    binary_data = ""
-    width, height = img.size
 
-    for y in range(height):
-        for x in range(width):
-            r, g, b = pixels[x, y]
-            binary_data += str(r & 1)
+# ---------- DECRYPT ----------
+def decrypt_message(binary_data: str, key: bytes) -> str:
+    cipher = Fernet(key)
+    byte_data = bytes(
+        int(binary_data[i:i+8], 2)
+        for i in range(0, len(binary_data), 8)
+    )
+    return cipher.decrypt(byte_data).decode()
 
-    bytes_data = [binary_data[i:i+8] for i in range(0, len(binary_data), 8)]
-    encrypted_msg = bytes(int(b, 2) for b in bytes_data)
 
-    decrypted_msg = cipher.decrypt(encrypted_msg)
-    return decrypted_msg.decode()
+# ---------- HIDE DATA ----------
+def hide_data(input_img: str, output_img: str, message: str, key: bytes):
+    img = Image.open(input_img).convert("RGB")
+    pixels = list(img.getdata())
 
-# Example
-secret = extract_data("output.png", key)
-print("Hidden Message:", secret)
+    binary_msg = encrypt_message(message, key)
+    if len(binary_msg) > len(pixels):
+        raise ValueError("Message too large for image")
 
+    new_pixels = []
+    msg_iter = iter(binary_msg)
+
+    for pixel in pixels:
+        try:
+            bit = next(msg_iter)
+            new_pixels.append((pixel[0] & ~1 | int(bit), pixel[1], pixel[2]))
+        except StopIteration:
+            new_pixels.append(pixel)
+
+    img.putdata(new_pixels)
+    img.save(output_img)
+    print("✔ Data hidden successfully")
+
+
+# ---------- EXTRACT DATA ----------
+def extract_data(stego_img: str, key: bytes) -> str:
+    img = Image.open(stego_img).convert("RGB")
+    pixels = img.getdata()
+
+    binary_data = "".join(str(pixel[0] & 1) for pixel in pixels)
+    end = binary_data.find(DELIMITER)
+
+    if end == -1:
+        raise ValueError("No hidden data found")
+
+    return decrypt_message(binary_data[:end], key)
+
+
+# ---------- USAGE ----------
+if __name__ == "__main__":
+    key = generate_key()
+    print("🔑 Key:", key)
+
+    hide_data(
+        input_img="input.png",
+        output_img="output.png",
+        message="Highly Secure Secret Message",
+        key=key
+    )
+
+    secret = extract_data("output.png", key)
+    print("🔓 Decrypted Message:", secret)
