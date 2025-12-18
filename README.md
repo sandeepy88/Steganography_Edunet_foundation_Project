@@ -1,39 +1,61 @@
-# 🕵️‍♂️ Steganography – Hiding Information in the Image
+from PIL import Image
+from cryptography.fernet import Fernet
 
-This project demonstrates how to hide and extract secret messages inside an image using Python.  
-It uses the **Least Significant Bit (LSB)** technique to embed text into image pixels without affecting the visible quality.
+# Generate key (run once & save it)
+key = Fernet.generate_key()
+cipher = Fernet(key)
 
----
+print("Encryption Key:", key)
 
-## 📌 Problem Statement
+def hide_data(image_path, message, output_image):
+    encrypted_msg = cipher.encrypt(message.encode())
+    binary_msg = ''.join(format(byte, '08b') for byte in encrypted_msg) + '1111111111111110'
 
-In today's digital age, secure transmission of sensitive data is essential.  
-The challenge is to hide information in such a way that it does not attract attention or suspicion.  
-This project solves this by hiding the message inside an image file.
+    img = Image.open(image_path)
+    pixels = img.load()
 
----
+    width, height = img.size
+    data_index = 0
 
-## 🛠️ Technologies Used
+    for y in range(height):
+        for x in range(width):
+            if data_index < len(binary_msg):
+                r, g, b = pixels[x, y]
+                r = (r & ~1) | int(binary_msg[data_index])
+                pixels[x, y] = (r, g, b)
+                data_index += 1
 
-- **Python 3.x**
-- **Pillow (PIL)** for image processing
-- `os` module for file operations
+    img.save(output_image)
+    print("Data hidden successfully!")
 
----
+# Example
+hide_data("input.png", "Secret Message Here", "output.png")
 
-## 🧠 Algorithm (LSB Steganography)
-
-### 🔐 Encoding (Hiding Text)
-1. Load the input image
-2. Convert the message to binary
-3. Modify the least significant bits of RGB pixels
-4. Save the modified image as output
-
-### 🔓 Decoding (Extracting Text)
-1. Read LSBs from output image
-2. Convert binary back to text
-3. Stop when end marker (`###`) is found
 
 ---
 
-## 📂 File Structure
+ 2. Extract + Decrypt Data from Image
+
+def extract_data(image_path, key):
+    cipher = Fernet(key)
+    img = Image.open(image_path)
+    pixels = img.load()
+
+    binary_data = ""
+    width, height = img.size
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b = pixels[x, y]
+            binary_data += str(r & 1)
+
+    bytes_data = [binary_data[i:i+8] for i in range(0, len(binary_data), 8)]
+    encrypted_msg = bytes(int(b, 2) for b in bytes_data)
+
+    decrypted_msg = cipher.decrypt(encrypted_msg)
+    return decrypted_msg.decode()
+
+# Example
+secret = extract_data("output.png", key)
+print("Hidden Message:", secret)
+
